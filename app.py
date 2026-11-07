@@ -165,13 +165,18 @@ def ago(dt: datetime | None) -> str:
     return ""
 
 
+def login_of(entry: dict) -> str:
+    """Login of an entry's author; GitHub returns a null user for deleted accounts."""
+    return (entry.get("user") or {}).get("login") or "ghost"
+
+
 def author_of(item: dict) -> tuple[str, str]:
     """(display author, profile url); mirrored items credit the original author."""
     m = ORIGIN_RE.search(item.get("body") or "")
     if m:
         return m.group(1), f"https://github.com/{m.group(1)}"
-    login = item["user"]["login"]
-    return login, item["user"]["html_url"]
+    login = login_of(item)
+    return login, f"https://github.com/{login}"
 
 
 # ---------- data collection ----------
@@ -180,7 +185,7 @@ MAINTAINER_ASSOCIATIONS = {"OWNER", "MEMBER", "COLLABORATOR"}
 
 
 def is_maintainer(entry: dict, maintainers: set[str]) -> bool:
-    return entry.get("author_association") in MAINTAINER_ASSOCIATIONS or entry["user"]["login"] in maintainers
+    return entry.get("author_association") in MAINTAINER_ASSOCIATIONS or login_of(entry) in maintainers
 
 
 def pr_details(repo: str, pr: dict, maintainers: set[str]) -> dict:
@@ -195,13 +200,13 @@ def pr_details(repo: str, pr: dict, maintainers: set[str]) -> dict:
             continue
         v = {"APPROVED": "Approve", "CHANGES_REQUESTED": "Changes requested"}.get(r["state"]) or find_verdict(r.get("body"))
         if v:
-            events.append((r.get("submitted_at"), v, r.get("body") or "", r.get("html_url"), r["user"]["login"]))
+            events.append((r.get("submitted_at"), v, r.get("body") or "", r.get("html_url"), login_of(r)))
     for c in comments + review_comments:
         if not is_maintainer(c, maintainers):
             continue
         v = find_verdict(c.get("body"))
         if v:
-            events.append((c.get("created_at") or c.get("updated_at"), v, c.get("body") or "", c.get("html_url"), c["user"]["login"]))
+            events.append((c.get("created_at") or c.get("updated_at"), v, c.get("body") or "", c.get("html_url"), login_of(c)))
     events.sort(key=lambda e: e[0] or "")
     verdict = events[-1] if events else None
 
