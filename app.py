@@ -127,7 +127,7 @@ def find_gif(body: str | None) -> tuple[str, str] | None:
         return None
     imgs = [(u, a) for a, u in MD_IMG_RE.findall(body)] + [(u, "") for u in HTML_IMG_RE.findall(body)]
     for url, alt in imgs:
-        if url.endswith(".svg") or "devin-review" in url:
+        if urlparse(url).scheme not in ("http", "https") or url.endswith(".svg") or "devin-review" in url:
             continue
         path = urlparse(url).path.lower()
         name = _jwt_filename(url).lower()
