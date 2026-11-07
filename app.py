@@ -138,15 +138,15 @@ def find_gif(body: str | None) -> tuple[str, str] | None:
     return None
 
 
-def linked_issue(body: str, issue_numbers: set[int]) -> int | None:
-    """Closing keyword ("Fixes #2") first, else the first mention of a known issue of this repo."""
-    m = LINKED_RE.search(body)
-    if m:
-        return int(m.group(1))
+def linked_issues(body: str, issue_numbers: set[int]) -> list[int]:
+    """Issues named with a closing keyword ("Fixes #2"), known issues first; else the first known issue mentioned."""
+    closing = list(dict.fromkeys(int(n) for n in LINKED_RE.findall(body)))
+    if closing:
+        return sorted(closing, key=lambda n: n not in issue_numbers)
     for n in MENTION_RE.findall(body):
         if int(n) in issue_numbers:
-            return int(n)
-    return None
+            return [int(n)]
+    return []
 
 
 def parse_time(s: str | None) -> datetime | None:
@@ -230,9 +230,9 @@ def collect_repo(repo: str, landed_days: int, maintainers: set[str]) -> dict:
 
     for p in open_prs:
         d = details[p["number"]]
-        linked = linked_issue(p.get("body") or "", issue_numbers)
-        if linked:
-            linked_by_open_pr.add(linked)
+        linked_all = linked_issues(p.get("body") or "", issue_numbers)
+        linked_by_open_pr.update(linked_all)
+        linked = linked_all[0] if linked_all else None
         who, who_url = author_of(p)
         item = {
             "repo": repo, "kind": "PR", "number": p["number"], "title": p["title"], "url": p["html_url"],
