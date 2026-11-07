@@ -206,7 +206,7 @@ def pr_details(repo: str, pr: dict, maintainers: set[str]) -> dict:
     verdict = events[-1] if events else None
 
     gif = None
-    bodies = ([verdict[2]] if verdict else []) + [pr.get("body") or ""] + [r.get("body") or "" for r in reviews] + [c.get("body") or "" for c in comments]
+    bodies = ([verdict[2]] if verdict else []) + [pr.get("body") or ""] + [r.get("body") or "" for r in reviews] + [c.get("body") or "" for c in comments + review_comments]
     for b in bodies:
         gif = find_gif(b)
         if gif:
