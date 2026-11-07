@@ -441,8 +441,8 @@ height:6rem;justify-content:center;padding:0;top:auto;width:100%}.rail__logo{dis
 .top__tabs a{border-radius:99rem;color:var(--muted);padding:.8rem 1.4rem;transition:background .3s var(--ease),color .3s var(--ease)}
 .top__tabs a:hover{background:rgb(16 16 18/6%);color:var(--ink)}
 .top__tabs span{color:var(--faint);font-weight:400;margin-left:.4rem}
-.top__actions{align-items:center;color:var(--muted);display:flex;font-size:1.4rem;gap:2rem;white-space:nowrap}
-@media (max-width:767px){.top__tabs{display:none}}
+.top__actions{align-items:center;margin-left:auto;color:var(--muted);display:flex;font-size:1.4rem;gap:2rem;white-space:nowrap}
+@media (max-width:1000px){.top__tabs{display:none}}
 .pill{align-items:center;border:1px solid var(--line);border-radius:99rem;color:var(--ink);display:inline-flex;font-size:1.4rem;font-weight:500;
 gap:.6rem;padding:.8rem 1.6rem;position:relative;transition:border-color .3s var(--ease),background .3s var(--ease);white-space:nowrap;z-index:2}
 .pill:hover{border-color:var(--ink)}.pill .glyph{height:1.4rem;width:1.4rem}
