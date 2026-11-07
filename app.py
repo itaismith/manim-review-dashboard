@@ -317,8 +317,41 @@ def ref(item: dict, multi: bool) -> str:
     return f"{prefix}#{item['number']}"
 
 
-def verdict_class(v: str) -> str:
-    return {"Approve": "ok", "Changes requested": "warn", "Close": "bad"}.get(v, "neutral")
+def avatar(name: str) -> str:
+    """Seeded conic-gradient avatar, as in math-design's Avatar component."""
+    v = 2166136261
+    for ch in name:
+        v = ((v ^ ord(ch)) * 16777619) & 0xFFFFFFFF
+    return (
+        f'<span aria-hidden="true" class="avatar" style="--angle:{v % 360}deg;'
+        f'--x:{20 + (v >> 9) % 60}%;--y:{20 + (v >> 17) % 60}%"></span>'
+    )
+
+
+def person(it: dict) -> str:
+    return f'<a class="person" href="{e(it["author_url"])}">{avatar(it["author"])}@{e(it["author"])}</a>'
+
+
+GLYPHS = {
+    "needs": "M3 10h3.5l1 2h3l1-2H15M3 10l2-6h8l2 6v5H3z",
+    "progress": "M3 3h5v5H3zM10 3h5v5h-5zM3 10h5v5H3zM10 10h5v5h-5z",
+    "landed": "M4 9.5 7.5 13 14 5",
+    "refresh": "M14.5 9a5.5 5.5 0 1 1-1.6-3.9M14.5 3v3.5H11",
+}
+
+
+def glyph(name: str) -> str:
+    return f'<svg aria-hidden="true" class="glyph" viewBox="0 0 18 18"><path d="{GLYPHS[name]}"/></svg>'
+
+
+LOGO = (
+    '<svg aria-hidden="true" viewBox="0 0 64 64"><defs><linearGradient id="tube" x1="0" x2="1">'
+    '<stop offset="0" stop-color="#ffd600"/><stop offset=".5" stop-color="#00e8aa"/>'
+    '<stop offset="1" stop-color="#1496ff"/></linearGradient></defs>'
+    '<path d="M8 46c10 0 16-4 18-14 2-12-10-14-10-4s14 18 24 18 14-4 16-8" fill="none" '
+    'stroke="url(#tube)" stroke-width="7" stroke-linecap="round"/>'
+    '<circle cx="56" cy="38" r="4.5" fill="#101012"/></svg>'
+)
 
 
 def render_needs_you(items: list, multi: bool) -> str:
@@ -327,32 +360,29 @@ def render_needs_you(items: list, multi: bool) -> str:
     out = []
     for it in items:
         linked = "".join(
-            f'<div class="meta">Fixes <a href="{e(url)}">#{n}</a>{" " + e(title) if title else ""}</div>'
+            f'<span class="card__caption">Fixes <a href="{e(url)}">#{n}</a>{" " + e(title) if title else ""}</span>'
             for n, title, url in it.get("linked") or []
         )
-        gif = ""
         if it.get("gif"):
             url, alt = it["gif"]
-            gif = f'<a class="gif" href="{e(url)}" target="_blank"><img src="{e(url)}" alt="{e(alt or "before/after")}" loading="lazy"></a>'
+            figure = f'<a class="card__figure" href="{e(url)}" target="_blank"><img src="{e(url)}" alt="{e(alt or "before/after")}" loading="lazy"></a>'
         else:
-            gif = '<div class="gif none">No before/after GIF</div>'
+            figure = '<span class="card__figure card__figure--none">No before/after GIF</span>'
         out.append(f"""
 <article class="card">
-  <div class="info">
-  <div class="card-head">
-    <span class="pill {verdict_class(it['verdict'])}">{e(it['verdict'])}</span>
-    <a class="num mono" href="{e(it['url'])}">{e(ref(it, multi))}</a>
-    <h3><a href="{e(it['url'])}">{e(it['title'])}</a></h3>
-  </div>
-  <div class="meta">by <a href="{e(it['author_url'])}">@{e(it['author'])}</a> · verdict
-    <a href="{e(it.get('verdict_url') or it['url'])}">{e(ago(it.get('verdict_time')))}</a></div>
-  {linked}
-  <div class="actions"><a class="btn" href="{e(it['url'])}">Open on GitHub</a>
-    <a class="link" href="{e(it['url'])}/files">Files changed</a></div>
-  </div>
-  {gif}
+  <a class="card__cover" href="{e(it['url'])}" aria-label="{e(it['title'])}"></a>
+  <span class="card__top"><span class="card__verdict">{e(it['verdict'])}</span>
+    <a class="card__label" href="{e(it.get('verdict_url') or it['url'])}">{e(ref(it, multi))} · {e(ago(it.get('verdict_time')))}</a></span>
+  {figure}
+  <span class="card__footer">
+    <a class="card__title" href="{e(it['url'])}">{e(it['title'])}</a>
+    {person(it)}
+    {linked}
+    <span class="card__actions"><a class="pill pill--ink" href="{e(it['url'])}">Open on GitHub</a>
+      <a class="pill" href="{e(it['url'])}/files">Files changed</a></span>
+  </span>
 </article>""")
-    return "\n".join(out)
+    return f'<div class="cards">{"".join(out)}</div>'
 
 
 def render_rows(items: list, multi: bool, landed: bool = False) -> str:
@@ -361,62 +391,113 @@ def render_rows(items: list, multi: bool, landed: bool = False) -> str:
     rows = []
     for it in items:
         if landed:
-            status = f'<span class="pill {"ok" if it["outcome"] == "Merged" else "neutral"}">{e(it["outcome"])}</span>'
+            status = it["outcome"]
             when = ago(it["closed"])
         else:
-            status = '<span class="pill neutral">Draft</span>' if it.get("draft") else ""
+            status = "Draft" if it.get("draft") else ""
             when = ago(it["updated"])
-        extra = ""
+        meta = [it["kind"]] + ([status] if status else [])
         if it.get("linked"):
-            refs = ", ".join(f'<a href="{e(url)}">#{n}</a>' for n, _, url in it["linked"])
-            extra = f' <span class="muted">· fixes {refs}</span>'
-        rows.append(f"""<tr>
-  <td class="kind">{e(it['kind'])}</td>
-  <td class="mono"><a href="{e(it['url'])}">{e(ref(it, multi))}</a></td>
-  <td class="title"><a href="{e(it['url'])}">{e(it['title'])}</a>{extra} {status}</td>
-  <td class="who"><a href="{e(it['author_url'])}">@{e(it['author'])}</a></td>
-  <td class="when mono">{e(when)}</td>
-</tr>""")
-    return f'<table><tbody>{"".join(rows)}</tbody></table>'
+            meta.append("fixes " + ", ".join(f'<a href="{e(url)}">#{n}</a>' for n, _, url in it["linked"]))
+        meta_html = " · ".join(m if m.startswith("fixes ") else e(m) for m in meta)
+        rows.append(f"""<li class="row">
+  <a class="row__ref" href="{e(it['url'])}">{e(ref(it, multi))}</a>
+  <span class="row__main"><a class="row__title" href="{e(it['url'])}">{e(it['title'])}</a>
+    <span class="row__meta">{meta_html}</span></span>
+  {person(it)}
+  <span class="row__when">{e(when)}</span>
+</li>""")
+    return f'<ul class="rows">{"".join(rows)}</ul>'
 
 
 CSS = """
-:root{--bg:#FCFCFC;--surface:#FFFFFF;--text:#191919;--text-muted:rgba(25,25,25,.56);--border:rgba(0,0,0,.10);
---accent:#317CFF;--accent-fg:#FFFFFF;--primary-action:var(--accent);--primary-action-fg:var(--accent-fg);--radius:6px;
---font:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,monospace;
---ok:#1a7f37;--warn:#9a6700;--bad:#cf222e}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 var(--font)}
-a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
-header{border-bottom:1px solid var(--border);background:var(--surface)}
-header .bar{max-width:1100px;margin:0 auto;display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between;padding:12px 20px}
-header h1{font-size:16px;margin:0}header .repos{color:var(--text-muted);font-size:13px}
-main{max-width:1100px;margin:0 auto;padding:16px 20px 40px}
-section{margin-top:20px}section h2{font-size:14px;margin:0 0 8px;display:flex;gap:8px;align-items:baseline}
-section h2 .count{font-family:var(--mono);color:var(--text-muted);font-weight:400}
-section .sub{color:var(--text-muted);font-size:13px;margin:-4px 0 10px}
-.needs{border:1px solid var(--accent);border-radius:var(--radius);padding:14px;background:var(--surface)}
-.cards{display:grid;gap:12px}
-.card{border:1px solid var(--border);border-radius:var(--radius);padding:12px;background:var(--surface);display:grid;grid-template-columns:minmax(0,2fr) minmax(0,3fr);gap:12px}
-.card .info{display:flex;flex-direction:column;gap:6px}
-@media (max-width:760px){.card{grid-template-columns:1fr}}
-.card-head{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:baseline}.card h3{font-size:14px;margin:0;flex-basis:100%}
-.card h3 a{color:var(--text)}.meta,.muted{color:var(--text-muted);font-size:13px}
-.gif img{width:100%;border:1px solid var(--border);border-radius:var(--radius);display:block;background:#000}
-.gif.none{border:1px dashed var(--border);border-radius:var(--radius);padding:16px;text-align:center;color:var(--text-muted);font-size:13px}
-.actions{display:flex;gap:12px;align-items:center;margin-top:4px}
-.btn{background:var(--primary-action);color:var(--primary-action-fg);padding:5px 10px;border-radius:var(--radius);font-size:13px}
-.btn:hover{text-decoration:none;opacity:.9}.link{font-size:13px}
-.pill{display:inline-block;font-size:12px;padding:1px 7px;border-radius:999px;border:1px solid var(--border);white-space:nowrap}
-.pill.ok{color:var(--ok);border-color:currentColor}.pill.warn{color:var(--warn);border-color:currentColor}
-.pill.bad{color:var(--bad);border-color:currentColor}.pill.neutral{color:var(--text-muted)}
-.mono{font-family:var(--mono);font-size:12.5px}.num{color:var(--text-muted)}
-table{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)}
-td{padding:7px 10px;border-top:1px solid var(--border);vertical-align:top}tr:first-child td{border-top:0}
-td.kind{color:var(--text-muted);width:48px;font-size:12px;padding-top:9px}td.title>a{color:var(--text)}
-td.who{white-space:nowrap;font-size:13px}td.when{white-space:nowrap;color:var(--text-muted);text-align:right}
-.empty{color:var(--text-muted);margin:0}.err{color:var(--bad);border:1px solid currentColor;border-radius:var(--radius);padding:8px 12px}
-footer{max-width:1100px;margin:0 auto;padding:0 20px 24px;color:var(--text-muted);font-size:12px}
-@media (max-width:600px){td.who,td.kind{display:none}header .bar{padding:10px 14px}main{padding:12px 14px 32px}}
+@font-face{font-display:swap;font-family:Geist;font-style:normal;font-weight:100 900;src:url('/fonts/Geist.woff2') format('woff2')}
+@font-face{font-display:swap;font-family:'Geist Mono';font-style:normal;font-weight:100 900;src:url('/fonts/GeistMono.woff2') format('woff2')}
+:root{--display:Geist,ui-sans-serif,system-ui,sans-serif;--faint:#a3a3a8;--gutter:4rem;--ink:#101012;--line:rgb(16 16 18/12%);
+--mono:'Geist Mono',ui-monospace,'SF Mono',Menlo,monospace;--muted:#66666c;--paper:#f6f6f4;--plate:#fff;--rail:7.2rem;
+--sans:Geist,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;--ease:cubic-bezier(.22,1,.36,1)}
+@media (max-width:767px){:root{--gutter:1.6rem;--rail:0rem}}
+*{box-sizing:border-box}
+html{background:var(--paper);color:var(--ink);font-size:calc(min(100vw,1680px)/1440*10)}
+@media (max-width:767px){html{font-size:calc(100vw/375*10)}}
+body{margin:0;background:var(--paper);font:400 1.5rem/1.5 var(--sans)}
+a{color:inherit;text-decoration:none}
+p,h1,h2,.card__title{text-wrap:balance}
+:focus-visible{outline:1px solid var(--ink);outline-offset:.3rem}
+.glyph{fill:none;flex-shrink:0;height:1.8rem;width:1.8rem;stroke:currentcolor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.3}
+.hidden{clip-path:inset(50%);height:1px;overflow:hidden;position:absolute;white-space:nowrap;width:1px}
+.rail{align-items:center;bottom:0;display:flex;flex-direction:column;left:0;padding:1.8rem 0;position:fixed;top:0;width:7.2rem;z-index:20}
+.rail__logo{display:block;height:3rem;width:3.6rem}.rail__logo svg{display:block;height:100%;width:100%}
+.rail__items{display:flex;flex-direction:column;gap:.8rem;margin:auto 0}
+.rail__item{align-items:center;border-radius:99rem;color:var(--muted);display:flex;height:4.4rem;justify-content:center;width:4.4rem;
+transition:background .3s var(--ease),color .3s var(--ease)}
+.rail__item:hover{background:rgb(16 16 18/6%);color:var(--ink)}
+@media (max-width:767px){.rail{background:rgb(246 246 244/92%);backdrop-filter:blur(12px);border-top:1px solid var(--line);flex-direction:row;
+height:6rem;justify-content:center;padding:0;top:auto;width:100%}.rail__logo{display:none}.rail__items{flex-direction:row;gap:2.4rem;margin:0}}
+.page{padding-left:var(--rail)}
+@media (max-width:767px){.page{padding-bottom:6rem}}
+.top{align-items:center;display:flex;gap:1.6rem;height:7.2rem;justify-content:space-between;padding:0 var(--gutter)}
+.top__tabs{display:flex;font-size:1.5rem;font-weight:500;gap:.4rem;margin-left:-1.4rem}
+.top__tabs a{border-radius:99rem;color:var(--muted);padding:.8rem 1.4rem;transition:background .3s var(--ease),color .3s var(--ease)}
+.top__tabs a:hover{background:rgb(16 16 18/6%);color:var(--ink)}
+.top__tabs span{color:var(--faint);font-weight:400;margin-left:.4rem}
+.top__actions{align-items:center;color:var(--muted);display:flex;font-size:1.4rem;gap:2rem;white-space:nowrap}
+@media (max-width:767px){.top__tabs{display:none}}
+.pill{align-items:center;border:1px solid var(--line);border-radius:99rem;color:var(--ink);display:inline-flex;font-size:1.4rem;font-weight:500;
+gap:.6rem;padding:.8rem 1.6rem;position:relative;transition:border-color .3s var(--ease),background .3s var(--ease);white-space:nowrap;z-index:2}
+.pill:hover{border-color:var(--ink)}.pill .glyph{height:1.4rem;width:1.4rem}
+.pill--ink{background:var(--ink);border-color:var(--ink);color:var(--paper)}.pill--ink:hover{background:#2a2a2e}
+main{padding:0 var(--gutter) 12rem}
+.statement{align-items:center;display:flex;flex-direction:column;gap:2rem;padding:10.4rem 0 9.6rem;text-align:center}
+.statement__title{font:500 7.2rem/1 var(--display);letter-spacing:-.025em;margin:0;max-width:96rem}
+.statement__title span{color:var(--faint)}
+.statement__text{color:var(--muted);font-size:1.8rem;line-height:1.4;margin:0;max-width:56rem}
+.statement__text a{text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:.3rem}
+@media (max-width:767px){.statement{padding:5.6rem 0 4.8rem}.statement__title{font-size:4rem}}
+section{margin-bottom:9.6rem;scroll-margin-top:2.4rem}
+.bar{align-items:baseline;border-bottom:1px solid var(--line);display:flex;gap:1.6rem;justify-content:space-between;margin-bottom:2.4rem;padding-bottom:1.6rem}
+.bar__title{font-size:1.5rem;font-weight:500;margin:0}.bar__title span{color:var(--faint);font-weight:400;margin-left:.6rem}
+.bar__text{color:var(--muted);font-size:1.4rem;margin:0;text-align:right}
+@media (max-width:767px){.bar{flex-direction:column;gap:.4rem}.bar__text{text-align:left}}
+.cards{display:grid;gap:.8rem;grid-template-columns:repeat(2,minmax(0,1fr));margin:0 calc(var(--gutter)*-1 + .8rem)}
+@media (max-width:1100px){.cards{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:767px){.cards{margin:0}}
+.card{aspect-ratio:4/3;background-color:#ececea;
+background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M0 .5h20M.5 0v20' fill='none' stroke='%23101012' stroke-opacity='.1' stroke-dasharray='1 3'/%3E%3C/svg%3E");
+background-position:-.05rem -.05rem;background-size:2rem 2rem;border-radius:.4rem;display:flex;flex-direction:column;gap:1.6rem;
+overflow:hidden;padding:1.8rem 2rem 2rem;position:relative;transition:background .4s var(--ease)}
+.card:hover{background-color:#e6e6e3}
+@media (max-width:767px){.card{aspect-ratio:auto}.card__figure{flex:none}}
+.card__cover{inset:0;position:absolute;z-index:1}
+.card__top{align-items:baseline;display:flex;gap:1.2rem;font-size:1.4rem}
+.card__verdict{font-weight:500}.card__label{color:var(--muted);position:relative;z-index:2}.card__label:hover{color:var(--ink)}
+.card__figure{align-items:center;display:flex;flex:1;justify-content:center;min-height:0;position:relative;z-index:2}
+.card__figure img{border-radius:.2rem;display:block;max-height:100%;max-width:100%;object-fit:contain}
+.card__figure--none{color:var(--faint);font-size:1.4rem;z-index:0}
+.card__footer{display:flex;flex-direction:column;font-size:2.2rem;gap:.4rem;letter-spacing:-.02em;line-height:1.1}
+.card__title{-webkit-box-orient:vertical;-webkit-line-clamp:2;display:-webkit-box;font-weight:500;overflow:hidden;position:relative;z-index:2}
+.card__footer .person{color:var(--muted);gap:.8rem}.card__footer .avatar{height:1em;width:1em}
+.card__caption{color:var(--muted);font-size:1.3rem;letter-spacing:0;line-height:1.4;margin-top:.4rem}
+.card__caption a,.row__meta a{position:relative;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:.3rem;z-index:2}
+.card__actions{display:flex;gap:.8rem;letter-spacing:0;margin-top:1.2rem}
+.person{align-items:center;display:inline-flex;gap:.8rem;min-width:0;position:relative;z-index:2}.person:hover{color:var(--ink)}
+.avatar{background:radial-gradient(circle at var(--x) var(--y),rgb(255 255 255/55%),transparent 55%),
+conic-gradient(from var(--angle),#ffd600,#b0f032,#00e8aa,#00f0ec,#00c8ff,#1496ff,#ffd600);border-radius:50%;display:inline-block;
+flex-shrink:0;height:2rem;width:2rem}
+.rows{list-style:none;margin:0;padding:0}
+.row{align-items:baseline;border-bottom:1px solid var(--line);display:grid;gap:2rem;grid-template-columns:7.2rem minmax(0,1fr) 20rem 8rem;padding:1.6rem 0}
+.row__ref,.row__when{color:var(--muted);font:400 1.3rem var(--mono)}.row__when{text-align:right}
+.row__main{display:flex;flex-direction:column;gap:.2rem;min-width:0}
+.row__title{font-weight:500}.row__title:hover,.row__ref:hover{color:var(--muted)}
+.row__meta{color:var(--muted);font-size:1.3rem}
+.row .person{color:var(--muted);font-size:1.4rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width:767px){.row{gap:.4rem 1.2rem;grid-template-columns:5.6rem minmax(0,1fr)}.row .person{display:none}
+.row__when{grid-column:2;text-align:left}}
+.empty{color:var(--faint);margin:0}
+.err{border:1px solid var(--line);border-radius:.4rem;color:var(--ink);margin:0 0 2.4rem;padding:1.2rem 1.6rem}
+footer{color:var(--muted);font-size:1.3rem;padding:0 var(--gutter) 4rem}
+footer a{text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:.3rem}
+@media (max-width:767px){footer{padding-bottom:8rem}}
 """
 
 
@@ -425,22 +506,49 @@ def render_page(data: dict) -> str:
     repos = ", ".join(f'<a href="https://github.com/{e(r)}">{e(r)}</a>' for r in data["repos"])
     errors = "".join(f'<p class="err">Could not read {e(msg)}</p>' for msg in data["errors"])
     fetched = data["fetched"].strftime("%H:%M UTC")
+    n = len(data["needs_you"])
+    if n:
+        title = f'{n} pull request{"s" if n != 1 else ""} {"needs" if n == 1 else "need"} you. <span>The rest is in hand.</span>'
+    else:
+        title = 'Nothing needs you. <span>The rest is in hand.</span>'
+    sections = [
+        ("needs-you", "needs", "Needs You", n, "Open PRs with a review verdict, waiting on your merge or decision.",
+         render_needs_you(data["needs_you"], multi)),
+        ("in-progress", "progress", "Still Being Worked On", len(data["in_progress"]),
+         "Open issues and PRs with no verdict yet. Issues with an open fix PR appear on that PR.",
+         render_rows(data["in_progress"], multi)),
+        ("landed", "landed", "Landed Recently", len(data["landed"]),
+         f"Merged or closed in the last {data['landed_days']} days.",
+         render_rows(data["landed"], multi, landed=True)),
+    ]
+    rail = "".join(
+        f'<a aria-label="{label}" class="rail__item" href="#{sid}" title="{label}">{glyph(icon)}</a>'
+        for sid, icon, label, *_ in sections
+    )
+    tabs = "".join(f'<a href="#{sid}">{label}<span>{count}</span></a>' for sid, _, label, count, *_ in sections)
+    body = "".join(
+        f'<section id="{sid}"><div class="bar"><h2 class="bar__title">{label}<span>{count}</span></h2>'
+        f'<p class="bar__text">{text}</p></div>{content}</section>'
+        for sid, _, label, count, text, content in sections
+    )
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Review dashboard ({len(data['needs_you'])} need you)</title><style>{CSS}</style></head><body>
-<header><div class="bar"><div><h1>Maintainer review dashboard</h1><div class="repos">{repos}</div></div>
-<div class="muted">Updated {fetched} · <a href="/?refresh=1">Refresh</a></div></div></header>
-<main>{errors}
-<section class="needs" id="needs-you"><h2>Needs you <span class="count">{len(data['needs_you'])}</span></h2>
-<p class="sub">Open PRs with a review verdict, waiting on your merge or decision.</p>
-<div class="cards">{render_needs_you(data['needs_you'], multi)}</div></section>
-<section id="in-progress"><h2>Still being worked on <span class="count">{len(data['in_progress'])}</span></h2>
-<p class="sub">Open issues and PRs with no verdict yet. Issues with an open fix PR appear on that PR.</p>
-{render_rows(data['in_progress'], multi)}</section>
-<section id="landed"><h2>Landed recently <span class="count">{len(data['landed'])}</span></h2>
-<p class="sub">Merged or closed in the last {data['landed_days']} days.</p>
-{render_rows(data['landed'], multi, landed=True)}</section>
-</main><footer>Reads GitHub directly. <a href="{e(SESSION_URL)}">Request changes</a></footer></body></html>"""
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#f6f6f4">
+<link rel="preload" href="/fonts/Geist.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<title>Review dashboard ({n} need you)</title><style>{CSS}</style></head><body>
+<nav aria-label="Sections" class="rail"><a class="rail__logo" href="/">{LOGO}<span class="hidden">Review dashboard</span></a>
+<div class="rail__items">{rail}</div></nav>
+<div class="page"><header class="top"><nav aria-label="Sections" class="top__tabs">{tabs}</nav>
+<div class="top__actions">Updated {fetched}<a class="pill" href="/?refresh=1">{glyph("refresh")}Refresh</a></div></header>
+<main>{errors}<header class="statement"><h1 class="statement__title">{title}</h1>
+<p class="statement__text">Maintainer review dashboard for {repos}.</p></header>{body}</main>
+<footer>Reads GitHub directly. <a href="{e(SESSION_URL)}">Request changes</a></footer></div></body></html>"""
+
+
+STATIC = {
+    "/fonts/Geist.woff2": ("static/fonts/Geist.woff2", "font/woff2"),
+    "/fonts/GeistMono.woff2": ("static/fonts/GeistMono.woff2", "font/woff2"),
+}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -451,6 +559,11 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/items":
             d = dashboard_data("refresh" in parse_qs(u.query))
             return self._send(200, json.dumps(d, default=str), "application/json")
+        if u.path == "/favicon.svg":
+            return self._send(200, LOGO.replace('aria-hidden="true" ', 'xmlns="http://www.w3.org/2000/svg" '), "image/svg+xml")
+        if u.path in STATIC:
+            path, ctype = STATIC[u.path]
+            return self._send(200, (ROOT / path).read_bytes(), ctype, "public, max-age=86400")
         if u.path != "/":
             return self._send(404, "not found", "text/plain")
         try:
@@ -459,12 +572,12 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as ex:
             self._send(500, f"<pre>{e(str(ex))}</pre>", "text/html; charset=utf-8")
 
-    def _send(self, code: int, body: str, ctype: str):
-        b = body.encode()
+    def _send(self, code: int, body: str | bytes, ctype: str, cache: str = "no-store"):
+        b = body if isinstance(body, bytes) else body.encode()
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(b)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache)
         self.end_headers()
         self.wfile.write(b)
 
