@@ -418,7 +418,7 @@ CSS = """
 --sans:Geist,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;--ease:cubic-bezier(.22,1,.36,1)}
 @media (max-width:767px){:root{--gutter:1.6rem;--rail:0rem}}
 *{box-sizing:border-box}
-html{background:var(--paper);color:var(--ink);font-size:calc(min(100vw,1680px)/1440*10)}
+html{background:var(--paper);color:var(--ink);font-size:max(9px,calc(min(100vw,1680px)/1440*10))}
 @media (max-width:767px){html{font-size:calc(100vw/375*10)}}
 body{margin:0;background:var(--paper);font:400 1.5rem/1.5 var(--sans)}
 a{color:inherit;text-decoration:none}
