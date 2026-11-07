@@ -31,3 +31,7 @@ PORT=8601 python3 app.py
 ```
 
 Endpoints: `/` (dashboard, `?refresh=1` skips the 60 s cache), `/api/items` (JSON), `/healthz`.
+
+## Style
+
+Follows the look of [itaismith/math-design](https://github.com/itaismith/math-design): off-white paper, left icon rail, centred statement, dotted-grid cards and seeded gradient avatars. Type is Geist and Geist Mono (`static/fonts/`, SIL Open Font License), not math-design's Die Grotesk test fonts, which may not be deployed.
