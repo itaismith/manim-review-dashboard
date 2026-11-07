@@ -11,10 +11,15 @@ Itai's review dashboard for the OSS maintenance Devin does. It reads GitHub dire
 `config.json`:
 
 ```json
-{ "repos": ["itaismith/manim-mock"], "landed_days": 14, "cache_seconds": 60 }
+{
+  "repos": ["itaismith/manim-mock"],
+  "landed_days": 14,
+  "cache_seconds": 60,
+  "maintainers": ["itaismith", "devin-ai-integration[bot]"]
+}
 ```
 
-Add repositories to `repos` (e.g. `"3b1b/manim"`), or override with `DASHBOARD_REPOS=owner/a,owner/b`.
+Verdicts count only from `maintainers` logins or from users GitHub marks as `OWNER`, `MEMBER` or `COLLABORATOR` on the repo. Add repositories to `repos` (e.g. `"3b1b/manim"`), or override with `DASHBOARD_REPOS=owner/a,owner/b`.
 
 GitHub auth: `GITHUB_TOKEN` if set, otherwise `gh auth token` (the box's GitHub connection), refreshed every 10 minutes.
 

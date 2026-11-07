@@ -32,6 +32,7 @@ def load_config() -> dict:
         cfg["repos"] = [r.strip() for r in env_repos.split(",") if r.strip()]
     cfg.setdefault("landed_days", 14)
     cfg.setdefault("cache_seconds", 60)
+    cfg.setdefault("maintainers", [])
     return cfg
 
 
@@ -175,7 +176,14 @@ def author_of(item: dict) -> tuple[str, str]:
 
 # ---------- data collection ----------
 
-def pr_details(repo: str, pr: dict) -> dict:
+MAINTAINER_ASSOCIATIONS = {"OWNER", "MEMBER", "COLLABORATOR"}
+
+
+def is_maintainer(entry: dict, maintainers: set[str]) -> bool:
+    return entry.get("author_association") in MAINTAINER_ASSOCIATIONS or entry["user"]["login"] in maintainers
+
+
+def pr_details(repo: str, pr: dict, maintainers: set[str]) -> dict:
     n = pr["number"]
     reviews = gh_get(f"/repos/{repo}/pulls/{n}/reviews")
     comments = gh_get(f"/repos/{repo}/issues/{n}/comments")
@@ -183,10 +191,14 @@ def pr_details(repo: str, pr: dict) -> dict:
 
     events = []  # (time, verdict, body, url, who)
     for r in reviews:
+        if not is_maintainer(r, maintainers):
+            continue
         v = {"APPROVED": "Approve", "CHANGES_REQUESTED": "Changes requested"}.get(r["state"]) or find_verdict(r.get("body"))
         if v:
             events.append((r.get("submitted_at"), v, r.get("body") or "", r.get("html_url"), r["user"]["login"]))
     for c in comments + review_comments:
+        if not is_maintainer(c, maintainers):
+            continue
         v = find_verdict(c.get("body"))
         if v:
             events.append((c.get("created_at") or c.get("updated_at"), v, c.get("body") or "", c.get("html_url"), c["user"]["login"]))
@@ -202,7 +214,7 @@ def pr_details(repo: str, pr: dict) -> dict:
     return {"verdict": verdict, "gif": gif}
 
 
-def collect_repo(repo: str, landed_days: int) -> dict:
+def collect_repo(repo: str, landed_days: int, maintainers: set[str]) -> dict:
     since = datetime.now(timezone.utc) - timedelta(days=landed_days)
     open_items = gh_get(f"/repos/{repo}/issues", {"state": "open"})
     closed_items = gh_get(f"/repos/{repo}/issues", {"state": "closed", "since": since.isoformat()})
@@ -211,7 +223,7 @@ def collect_repo(repo: str, landed_days: int) -> dict:
 
     open_prs = [i for i in open_items if "pull_request" in i]
     with ThreadPoolExecutor(max_workers=6) as ex:
-        details = dict(zip([p["number"] for p in open_prs], ex.map(lambda p: pr_details(repo, p), open_prs)))
+        details = dict(zip([p["number"] for p in open_prs], ex.map(lambda p: pr_details(repo, p, maintainers), open_prs)))
 
     needs_you, in_progress, landed = [], [], []
     linked_by_open_pr = set()
@@ -276,7 +288,7 @@ def dashboard_data(force: bool = False) -> dict:
     data = {"needs_you": [], "in_progress": [], "landed": [], "errors": [], "repos": cfg["repos"]}
     for repo in cfg["repos"]:
         try:
-            r = collect_repo(repo, cfg["landed_days"])
+            r = collect_repo(repo, cfg["landed_days"], set(cfg["maintainers"]))
             for k in ("needs_you", "in_progress", "landed"):
                 data[k].extend(r[k])
         except Exception as e:  # show per-repo failures instead of a blank page

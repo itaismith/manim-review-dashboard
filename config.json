@@ -1,5 +1,11 @@
 {
-  "repos": ["itaismith/manim-mock"],
+  "repos": [
+    "itaismith/manim-mock"
+  ],
   "landed_days": 14,
-  "cache_seconds": 60
+  "cache_seconds": 60,
+  "maintainers": [
+    "itaismith",
+    "devin-ai-integration[bot]"
+  ]
 }
