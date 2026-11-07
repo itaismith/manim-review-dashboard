@@ -237,13 +237,12 @@ def collect_repo(repo: str, landed_days: int, maintainers: set[str]) -> dict:
         d = details[p["number"]]
         linked_all = linked_issues(p.get("body") or "", issue_numbers)
         linked_by_open_pr.update(linked_all)
-        linked = linked_all[0] if linked_all else None
         who, who_url = author_of(p)
         item = {
             "repo": repo, "kind": "PR", "number": p["number"], "title": p["title"], "url": p["html_url"],
             "author": who, "author_url": who_url, "updated": parse_time(p["updated_at"]),
             "draft": p.get("draft", False),
-            "linked": (linked, titles.get(linked), f"https://github.com/{repo}/issues/{linked}") if linked else None,
+            "linked": [(n, titles.get(n), f"https://github.com/{repo}/issues/{n}") for n in linked_all],
             "gif": d["gif"],
         }
         if d["verdict"] and not item["draft"]:
@@ -327,10 +326,10 @@ def render_needs_you(items: list, multi: bool) -> str:
         return '<p class="empty">Nothing is waiting on you.</p>'
     out = []
     for it in items:
-        linked = ""
-        if it.get("linked"):
-            n, title, url = it["linked"]
-            linked = f'<div class="meta">Fixes <a href="{e(url)}">#{n}</a>{" " + e(title) if title else ""}</div>'
+        linked = "".join(
+            f'<div class="meta">Fixes <a href="{e(url)}">#{n}</a>{" " + e(title) if title else ""}</div>'
+            for n, title, url in it.get("linked") or []
+        )
         gif = ""
         if it.get("gif"):
             url, alt = it["gif"]
@@ -369,8 +368,8 @@ def render_rows(items: list, multi: bool, landed: bool = False) -> str:
             when = ago(it["updated"])
         extra = ""
         if it.get("linked"):
-            n, _, url = it["linked"]
-            extra = f' <span class="muted">· fixes <a href="{e(url)}">#{n}</a></span>'
+            refs = ", ".join(f'<a href="{e(url)}">#{n}</a>' for n, _, url in it["linked"])
+            extra = f' <span class="muted">· fixes {refs}</span>'
         rows.append(f"""<tr>
   <td class="kind">{e(it['kind'])}</td>
   <td class="mono"><a href="{e(it['url'])}">{e(ref(it, multi))}</a></td>
