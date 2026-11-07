@@ -465,7 +465,7 @@ section{margin-bottom:9.6rem;scroll-margin-top:2.4rem}
 .card{aspect-ratio:4/3;background-color:#ececea;
 background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M0 .5h20M.5 0v20' fill='none' stroke='%23101012' stroke-opacity='.1' stroke-dasharray='1 3'/%3E%3C/svg%3E");
 background-position:-.05rem -.05rem;background-size:2rem 2rem;border-radius:.4rem;display:flex;flex-direction:column;gap:1.6rem;
-overflow:hidden;padding:1.8rem 2rem 2rem;position:relative;transition:background .4s var(--ease)}
+padding:1.8rem 2rem 2rem;position:relative;transition:background .4s var(--ease)}
 .card:hover{background-color:#e6e6e3}
 @media (max-width:767px){.card{aspect-ratio:auto}.card__figure{flex:none}}
 .card__cover{inset:0;position:absolute;z-index:1}
