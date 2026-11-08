@@ -33,6 +33,9 @@ def load_config() -> dict:
     cfg.setdefault("landed_days", 14)
     cfg.setdefault("cache_seconds", 60)
     cfg.setdefault("maintainers", [])
+    cfg.setdefault("bot_authors", [])
+    cfg.setdefault("ready_label", "Ready for Itai")
+    cfg.setdefault("ready_status", "Devin Review")
     return cfg
 
 
@@ -87,6 +90,7 @@ def gh_get(path: str, params: dict | None = None) -> list | dict:
 
 VERDICT_RE = re.compile(r"\bverdict\b\s*\**\s*[:\-]\s*\**\s*([A-Za-z][A-Za-z \-']{1,40})", re.I)
 LINKED_RE = re.compile(r"\b(?:fix(?:e[sd])?|close[sd]?|resolve[sd]?)\s*:?\s+#(\d+)", re.I)
+SUPERSEDES_RE = re.compile(r"\bsupersed(?:es|ing)\s+#(\d+)", re.I)
 MENTION_RE = re.compile(r"(?<![\w/#&])#(\d+)\b")
 ORIGIN_RE = re.compile(r"Originally opened by @([A-Za-z0-9-]+)(?: as (\S+))?")
 MD_IMG_RE = re.compile(r"!\[([^\]]*)\]\((\S+?)(?:\s+\"[^\"]*\")?\)")
@@ -188,7 +192,16 @@ def is_maintainer(entry: dict, maintainers: set[str]) -> bool:
     return entry.get("author_association") in MAINTAINER_ASSOCIATIONS or login_of(entry) in maintainers
 
 
-def pr_details(repo: str, pr: dict, maintainers: set[str]) -> dict:
+def ready_status(repo: str, sha: str, context: str) -> dict | None:
+    """The head commit's `context` status (e.g. Devin Review) if it passed, else None."""
+    st = gh_get(f"/repos/{repo}/commits/{sha}/status")
+    for s in st.get("statuses", []):
+        if s.get("context") == context:
+            return s if s.get("state") == "success" else None
+    return None
+
+
+def pr_details(repo: str, pr: dict, maintainers: set[str], ready_context: str | None = None) -> dict:
     n = pr["number"]
     reviews = gh_get(f"/repos/{repo}/pulls/{n}/reviews")
     comments = gh_get(f"/repos/{repo}/issues/{n}/comments")
@@ -216,21 +229,47 @@ def pr_details(repo: str, pr: dict, maintainers: set[str]) -> dict:
         gif = find_gif(b)
         if gif:
             break
-    return {"verdict": verdict, "gif": gif}
+    ready, ready_error = None, None
+    if ready_context:
+        try:
+            ready = ready_status(repo, pr["head"]["sha"], ready_context)
+        except Exception as ex:  # report it rather than drop the whole repo; the label still works
+            ready_error = f"{repo}#{pr['number']} {ready_context} status: {ex}"
+    return {"verdict": verdict, "gif": gif, "ready": ready, "ready_error": ready_error}
 
 
-def collect_repo(repo: str, landed_days: int, maintainers: set[str]) -> dict:
+def is_bot_own(pr: dict, bot_authors: set[str]) -> bool:
+    """Opened by the maintainer bot itself, not mirrored from someone else's upstream PR."""
+    return login_of(pr) in bot_authors and not ORIGIN_RE.search(pr.get("body") or "")
+
+
+def collect_repo(repo: str, landed_days: int, maintainers: set[str], cfg: dict | None = None) -> dict:
+    cfg = cfg or {}
+    bot_authors = set(cfg.get("bot_authors", []))
+    ready_label = (cfg.get("ready_label") or "").lower()
     since = datetime.now(timezone.utc) - timedelta(days=landed_days)
     open_items = gh_get(f"/repos/{repo}/issues", {"state": "open"})
     closed_items = gh_get(f"/repos/{repo}/issues", {"state": "closed", "since": since.isoformat()})
     titles = {i["number"]: i["title"] for i in open_items + closed_items}
     issue_numbers = {i["number"] for i in open_items + closed_items if "pull_request" not in i}
 
-    open_prs = [i for i in open_items if "pull_request" in i]
-    with ThreadPoolExecutor(max_workers=6) as ex:
-        details = dict(zip([p["number"] for p in open_prs], ex.map(lambda p: pr_details(repo, p, maintainers), open_prs)))
+    open_prs = gh_get(f"/repos/{repo}/pulls", {"state": "open"})
+    labels = {i["number"]: {lbl["name"].lower() for lbl in i.get("labels", [])} for i in open_items}
 
-    needs_you, in_progress, landed = [], [], []
+    def details_of(p: dict) -> dict:
+        own = is_bot_own(p, bot_authors) and not p.get("draft")
+        return pr_details(repo, p, maintainers, cfg.get("ready_status") if own else None)
+
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        details = dict(zip([p["number"] for p in open_prs], ex.map(details_of, open_prs)))
+
+    open_numbers = {p["number"] for p in open_prs}
+    superseded_by = {}
+    for p in sorted(open_prs, key=lambda p: p["number"]):
+        for n in SUPERSEDES_RE.findall(p.get("body") or ""):
+            if int(n) in open_numbers and int(n) != p["number"]:
+                superseded_by[int(n)] = p
+    needs_you, waiting, in_progress, landed = [], [], [], []
     linked_by_open_pr = set()
 
     for p in open_prs:
@@ -245,9 +284,29 @@ def collect_repo(repo: str, landed_days: int, maintainers: set[str]) -> dict:
             "linked": [(n, titles.get(n), f"https://github.com/{repo}/issues/{n}") for n in linked_all],
             "gif": d["gif"],
         }
-        if d["verdict"] and not item["draft"]:
+        if d["verdict"]:
             t, v, _, vurl, vwho = d["verdict"]
             item.update(verdict=v, verdict_url=vurl, verdict_by=vwho, verdict_time=parse_time(t))
+        own_ready = is_bot_own(p, bot_authors) and (
+            bool(d["ready"]) or (bool(ready_label) and ready_label in labels.get(p["number"], set()))
+        )
+        newer = superseded_by.get(p["number"])
+        if item["draft"]:
+            in_progress.append(item)
+        elif newer:
+            item["waiting"] = (f"Superseded by #{newer['number']}", newer["html_url"])
+            waiting.append(item)
+        elif item.get("verdict") == "Changes requested":
+            item["waiting"] = ("Changes requested", item["verdict_url"])
+            waiting.append(item)
+        elif item.get("verdict"):
+            needs_you.append(item)
+        elif own_ready:
+            r = d["ready"] or {}
+            item.update(
+                verdict="Ready for review", verdict_url=r.get("target_url") or p["html_url"],
+                verdict_by=login_of(p), verdict_time=parse_time(r.get("updated_at")) or item["updated"],
+            )
             needs_you.append(item)
         else:
             in_progress.append(item)
@@ -277,7 +336,8 @@ def collect_repo(repo: str, landed_days: int, maintainers: set[str]) -> dict:
             "url": i["html_url"], "author": who, "author_url": who_url, "closed": closed, "outcome": outcome,
         })
 
-    return {"needs_you": needs_you, "in_progress": in_progress, "landed": landed}
+    errors = [d["ready_error"] for d in details.values() if d["ready_error"]]
+    return {"needs_you": needs_you, "waiting": waiting, "in_progress": in_progress, "landed": landed, "errors": errors}
 
 
 _cache_lock = threading.Lock()
@@ -289,15 +349,17 @@ def dashboard_data(force: bool = False) -> dict:
     with _cache_lock:
         if not force and _cache and time.time() - _cache["at"] < cfg["cache_seconds"]:
             return _cache["data"]
-    data = {"needs_you": [], "in_progress": [], "landed": [], "errors": [], "repos": cfg["repos"]}
+    data = {"needs_you": [], "waiting": [], "in_progress": [], "landed": [], "errors": [], "repos": cfg["repos"]}
     for repo in cfg["repos"]:
         try:
-            r = collect_repo(repo, cfg["landed_days"], set(cfg["maintainers"]))
-            for k in ("needs_you", "in_progress", "landed"):
+            r = collect_repo(repo, cfg["landed_days"], set(cfg["maintainers"]), cfg)
+            for k in ("needs_you", "waiting", "in_progress", "landed"):
                 data[k].extend(r[k])
+            data["errors"].extend(r["errors"])
         except Exception as e:  # show per-repo failures instead of a blank page
             data["errors"].append(f"{repo}: {e}")
     data["needs_you"].sort(key=lambda x: x["verdict_time"] or x["updated"], reverse=True)
+    data["waiting"].sort(key=lambda x: x["updated"], reverse=True)
     data["in_progress"].sort(key=lambda x: x["updated"], reverse=True)
     data["landed"].sort(key=lambda x: x["closed"], reverse=True)
     data["landed_days"] = cfg["landed_days"]
@@ -335,6 +397,7 @@ def person(it: dict) -> str:
 GLYPHS = {
     "needs": "M3 10h3.5l1 2h3l1-2H15M3 10l2-6h8l2 6v5H3z",
     "progress": "M3 3h5v5H3zM10 3h5v5h-5zM3 10h5v5H3zM10 10h5v5h-5z",
+    "waiting": "M9 3a6 6 0 1 0 0 12A6 6 0 0 0 9 3zM9 6v3.5l2.5 1.5",
     "landed": "M4 9.5 7.5 13 14 5",
     "refresh": "M14.5 9a5.5 5.5 0 1 1-1.6-3.9M14.5 3v3.5H11",
 }
@@ -390,16 +453,20 @@ def render_rows(items: list, multi: bool, landed: bool = False) -> str:
         return '<p class="empty">Nothing here.</p>'
     rows = []
     for it in items:
+        meta = [e(it["kind"])]
         if landed:
-            status = it["outcome"]
+            meta.append(e(it["outcome"]))
             when = ago(it["closed"])
         else:
-            status = "Draft" if it.get("draft") else ""
+            if it.get("draft"):
+                meta.append("Draft")
             when = ago(it["updated"])
-        meta = [it["kind"]] + ([status] if status else [])
+        if it.get("waiting"):
+            tag, url = it["waiting"]
+            meta.append(f'<a class="row__tag" href="{e(url)}">{e(tag)}</a>')
         if it.get("linked"):
             meta.append("fixes " + ", ".join(f'<a href="{e(url)}">#{n}</a>' for n, _, url in it["linked"]))
-        meta_html = " · ".join(m if m.startswith("fixes ") else e(m) for m in meta)
+        meta_html = " · ".join(meta)
         rows.append(f"""<li class="row">
   <a class="row__ref" href="{e(it['url'])}">{e(ref(it, multi))}</a>
   <span class="row__main"><a class="row__title" href="{e(it['url'])}">{e(it['title'])}</a>
@@ -489,7 +556,7 @@ flex-shrink:0;height:2rem;width:2rem}
 .row__ref,.row__when{color:var(--muted);font:400 1.3rem var(--mono)}.row__when{text-align:right}
 .row__main{display:flex;flex-direction:column;gap:.2rem;min-width:0}
 .row__title{font-weight:500}.row__title:hover,.row__ref:hover{color:var(--muted)}
-.row__meta{color:var(--muted);font-size:1.3rem}
+.row__meta{color:var(--muted);font-size:1.3rem}.row__meta .row__tag{color:var(--ink);font-weight:500}
 .row .person{color:var(--muted);font-size:1.4rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media (max-width:767px){.row{gap:.4rem 1.2rem;grid-template-columns:5.6rem minmax(0,1fr)}.row .person{display:none}
 .row__when{grid-column:2;text-align:left}}
@@ -512,10 +579,14 @@ def render_page(data: dict) -> str:
     else:
         title = 'Nothing needs you. <span>The rest is in hand.</span>'
     sections = [
-        ("needs-you", "needs", "Needs You", n, "Open PRs with a review verdict, waiting on your merge or decision.",
+        ("needs-you", "needs", "Needs You", n,
+         "Open PRs waiting on your merge or decision: reviewed PRs, and the bot's own PRs once Devin Review is clean.",
          render_needs_you(data["needs_you"], multi)),
+        ("waiting", "waiting", "Waiting On Author", len(data["waiting"]),
+         "Changes requested, or replaced by a newer PR. Nothing to do until the author responds.",
+         render_rows(data["waiting"], multi)),
         ("in-progress", "progress", "Still Being Worked On", len(data["in_progress"]),
-         "Open issues and PRs with no verdict yet. Issues with an open fix PR appear on that PR.",
+         "Open issues, drafts and PRs not yet ready for review. Issues with an open fix PR appear on that PR.",
          render_rows(data["in_progress"], multi)),
         ("landed", "landed", "Landed Recently", len(data["landed"]),
          f"Merged or closed in the last {data['landed_days']} days.",

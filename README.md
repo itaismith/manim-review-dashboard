@@ -15,9 +15,14 @@ Itai's review dashboard for the OSS maintenance Devin does. It reads GitHub dire
   "repos": ["itaismith/manim-mock"],
   "landed_days": 14,
   "cache_seconds": 60,
-  "maintainers": ["itaismith", "devin-ai-integration[bot]"]
+  "maintainers": ["itaismith", "devin-ai-integration[bot]"],
+  "bot_authors": ["devin-ai-integration[bot]"],
+  "ready_label": "Ready for Itai",
+  "ready_status": "Devin Review"
 }
 ```
+
+`bot_authors` are the maintainer bot's logins. A PR they open themselves (not a mirror crediting an upstream author) goes to Needs You once it is out of draft and its head commit's `ready_status` commit status (Devin Review) has passed, or once it carries the `ready_label` label (`Ready for Itai`). PRs whose latest verdict is changes requested, or that another open PR names with "Supersedes #N", go to Waiting On Author.
 
 Verdicts count only from `maintainers` logins or from users GitHub marks as `OWNER`, `MEMBER` or `COLLABORATOR` on the repo. Add repositories to `repos` (e.g. `"3b1b/manim"`), or override with `DASHBOARD_REPOS=owner/a,owner/b`.
 
