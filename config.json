@@ -7,5 +7,10 @@
   "maintainers": [
     "itaismith",
     "devin-ai-integration[bot]"
-  ]
+  ],
+  "bot_authors": [
+    "devin-ai-integration[bot]"
+  ],
+  "ready_label": "Ready for Itai",
+  "ready_status": "Devin Review"
 }
