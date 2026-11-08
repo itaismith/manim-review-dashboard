@@ -194,7 +194,10 @@ def is_maintainer(entry: dict, maintainers: set[str]) -> bool:
 
 def ready_status(repo: str, sha: str, context: str) -> dict | None:
     """The head commit's `context` status (e.g. Devin Review) if it passed, else None."""
-    st = gh_get(f"/repos/{repo}/commits/{sha}/status")
+    try:
+        st = gh_get(f"/repos/{repo}/commits/{sha}/status")
+    except Exception:  # e.g. a token without commit-status access; the label still works
+        return None
     for s in st.get("statuses", []):
         if s.get("context") == context:
             return s if s.get("state") == "success" else None
