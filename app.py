@@ -194,10 +194,7 @@ def is_maintainer(entry: dict, maintainers: set[str]) -> bool:
 
 def ready_status(repo: str, sha: str, context: str) -> dict | None:
     """The head commit's `context` status (e.g. Devin Review) if it passed, else None."""
-    try:
-        st = gh_get(f"/repos/{repo}/commits/{sha}/status")
-    except Exception:  # e.g. a token without commit-status access; the label still works
-        return None
+    st = gh_get(f"/repos/{repo}/commits/{sha}/status")
     for s in st.get("statuses", []):
         if s.get("context") == context:
             return s if s.get("state") == "success" else None
@@ -232,8 +229,13 @@ def pr_details(repo: str, pr: dict, maintainers: set[str], ready_context: str | 
         gif = find_gif(b)
         if gif:
             break
-    ready = ready_status(repo, pr["head"]["sha"], ready_context) if ready_context else None
-    return {"verdict": verdict, "gif": gif, "ready": ready}
+    ready, ready_error = None, None
+    if ready_context:
+        try:
+            ready = ready_status(repo, pr["head"]["sha"], ready_context)
+        except Exception as ex:  # report it rather than drop the whole repo; the label still works
+            ready_error = f"{repo}#{pr['number']} {ready_context} status: {ex}"
+    return {"verdict": verdict, "gif": gif, "ready": ready, "ready_error": ready_error}
 
 
 def is_bot_own(pr: dict, bot_authors: set[str]) -> bool:
@@ -334,7 +336,8 @@ def collect_repo(repo: str, landed_days: int, maintainers: set[str], cfg: dict |
             "url": i["html_url"], "author": who, "author_url": who_url, "closed": closed, "outcome": outcome,
         })
 
-    return {"needs_you": needs_you, "waiting": waiting, "in_progress": in_progress, "landed": landed}
+    errors = [d["ready_error"] for d in details.values() if d["ready_error"]]
+    return {"needs_you": needs_you, "waiting": waiting, "in_progress": in_progress, "landed": landed, "errors": errors}
 
 
 _cache_lock = threading.Lock()
@@ -352,6 +355,7 @@ def dashboard_data(force: bool = False) -> dict:
             r = collect_repo(repo, cfg["landed_days"], set(cfg["maintainers"]), cfg)
             for k in ("needs_you", "waiting", "in_progress", "landed"):
                 data[k].extend(r[k])
+            data["errors"].extend(r["errors"])
         except Exception as e:  # show per-repo failures instead of a blank page
             data["errors"].append(f"{repo}: {e}")
     data["needs_you"].sort(key=lambda x: x["verdict_time"] or x["updated"], reverse=True)
